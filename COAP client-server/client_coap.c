@@ -1,40 +1,4 @@
-/*
- * Copyright (c) 2013, Institute for Pervasive Computing, ETH Zurich
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the Institute nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE INSTITUTE AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE INSTITUTE OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
- * This file is part of the Contiki operating system.
- */
-
-/**
- * \file
- *      Erbium (Er) CoAP client example.
- * \author
- *      Matthias Kovatsch <kovatsch@inf.ethz.ch>
- */
+client CoAP
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,6 +9,7 @@
 #include "dev/button-sensor.h"
 
 #include "dev/serial-line.h"
+#include "dev/leds.h"
 
 #define DEBUG 0
 #if DEBUG
@@ -59,14 +24,14 @@
 #endif
 
 /* FIXME: This server address is hard-coded for Cooja and link-local for unconnected border router. */
-#define SERVER_NODE(ipaddr)   uip_ip6addr(ipaddr, 0x2001, 0x660, 0x5307, 0x310F, 0, 0, 0, 0x8871)      /* cooja2 */
+#define SERVER_NODE(ipaddr)   uip_ip6addr(ipaddr, 0x2001, 0x660, 0x330f, 0x3100, 0, 0, 0, 0xa576)      /* cooja2 */
 /* #define SERVER_NODE(ipaddr)   uip_ip6addr(ipaddr, 0xbbbb, 0, 0, 0, 0, 0, 0, 0x1) */
 
 #define LOCAL_PORT      UIP_HTONS(COAP_DEFAULT_PORT + 1)
 #define REMOTE_PORT     UIP_HTONS(COAP_DEFAULT_PORT)
 
-#define TOGGLE_INTERVAL 10
-int toggle_interval = 10;
+#define TOGGLE_INTERVAL 2
+int toggle_interval = 2;
 
 extern resource_t
   res_hello,
@@ -142,21 +107,43 @@ static struct etimer et;
 #define NUMBER_OF_URLS 4
 /* leading and ending slashes only for demo purposes, get cropped automatically when setting the Uri-Path */
 char *service_urls[NUMBER_OF_URLS] =
-{ ".well-known/core", "/actuators/toggle", "/sensors/pressure", "/sensors/light" };
+{ ".well-known/core", "/actuators/toggle", "/sensors/temperature", "/sensors/light" };
 #if PLATFORM_HAS_BUTTON
 static int uri_switch = 0;
 #endif
 
 /* This function is will be passed to COAP_BLOCKING_REQUEST() to handle responses. */
-void
-client_chunk_handler(void *response)
-{
-  const uint8_t *chunk;
+// Assurez-vous que ce fichier d'en-tête est inclus pour utiliser les LEDs
 
-  int len = coap_get_payload(response, &chunk);
+ 
+void client_chunk_handler(void *response) {
 
-  printf("|%.*s", len, (char *)chunk);
+
+    const uint8_t *chunk;
+    int len = coap_get_payload(response, &chunk);
+
+    printf("|%.*s", len, (char *)chunk);
+
+    if(len == 1) { // Vérifie la longueur de la réponse
+        if(*chunk == '1') {
+            leds_on(LEDS_RED); // Allume la LED rouge si la réponse est '1'
+            printf ("LED rouge allumée car la lumière est en dessous de la lumière requise pour bien vivre \n");
+
+        } else if (*chunk == '0') {
+            leds_off(LEDS_RED); // Éteint la LED rouge si la réponse est '0'
+
+            printf("LED rouge éteinte car on a assez de lumière dans l'environnement pour bien vivre\n");
+        } 
+        
+        else {
+            printf("Réponse inattendue\n");
+        }
+    } else {
+        printf("Réponse invalide\n");
+    }
+
 }
+
 PROCESS_THREAD(er_example_client, ev, data)
 {
   PROCESS_BEGIN();
@@ -175,51 +162,38 @@ PROCESS_THREAD(er_example_client, ev, data)
   printf("Press a button to request %s\n", service_urls[uri_switch]);
 #endif
 
-  while(1) {
+while (1) {
     PROCESS_YIELD();
 
-    if(etimer_expired(&et)) {
-      printf("--Toggle timer--\n");
+    if (etimer_expired(&et)) {
+        printf("--Toggle timer--\n");
 
-      /* prepare request, TID is set by COAP_BLOCKING_REQUEST() */
-      coap_init_message(request, COAP_TYPE_CON, COAP_GET, 0);
-      coap_set_header_uri_path(request, service_urls[3]);
+        /* Requête GET pour la température */
+        //coap_init_message(request, COAP_TYPE_CON, COAP_PUT, 0);
+        //coap_set_header_uri_path(request, "sensors/temperature");
 
-      const char msg[] = "Toggle!";
+        PRINT6ADDR(&server_ipaddr);
+        PRINTF(" : %u\n", UIP_HTONS(REMOTE_PORT));
 
-      coap_set_payload(request, (uint8_t *)msg, sizeof(msg) - 1);
+        COAP_BLOCKING_REQUEST(&server_ipaddr, REMOTE_PORT, request, client_chunk_handler);
 
-      PRINT6ADDR(&server_ipaddr);
-      PRINTF(" : %u\n", UIP_HTONS(REMOTE_PORT));
+        printf("\n--Done temperature--\n");
 
-      COAP_BLOCKING_REQUEST(&server_ipaddr, REMOTE_PORT, request,
-                            client_chunk_handler);
+        /* Requête pour la lumière */
+        coap_init_message(request, COAP_TYPE_CON, COAP_GET, 0);
+        coap_set_header_uri_path(request, "sensors/light");
 
-      printf("\n--Done--\n");
+        PRINT6ADDR(&server_ipaddr);
+        PRINTF(" : %u\n", UIP_HTONS(REMOTE_PORT));
 
-      etimer_reset(&et);
+        COAP_BLOCKING_REQUEST(&server_ipaddr, REMOTE_PORT, request, client_chunk_handler_light);
 
-#if PLATFORM_HAS_BUTTON
-    } else if(ev == sensors_event && data == &button_sensor) {
+        printf("\n--Done light--\n");
 
-      /* send a request to notify the end of the process */
-
-      coap_init_message(request, COAP_TYPE_CON, COAP_GET, 3);
-      coap_set_header_uri_path(request, service_urls[uri_switch]);
-
-      printf("--Requesting %s--\n", service_urls[uri_switch]);
-
-      PRINT6ADDR(&server_ipaddr);
-      PRINTF(" : %u\n", UIP_HTONS(REMOTE_PORT));
-
-      COAP_BLOCKING_REQUEST(&server_ipaddr, REMOTE_PORT, request,
-                            client_chunk_handler);
-
-      printf("\n--Done--\n");
-
-      uri_switch = (uri_switch + 1) % NUMBER_OF_URLS;
-#endif
+        etimer_reset(&et);
     }
+}
+
   }
 
   PROCESS_END();
@@ -248,19 +222,7 @@ PROCESS_THREAD(er_example_server, ev, data)
   /* Initialize the REST engine. */
   rest_init_engine();
 
-  /*
-   * Bind the resources to their Uri-Path.
-   * WARNING: Activating twice only means alternate path, not two instances!
-   * All static variables are the same for each URI path.
-   */
-  rest_activate_resource(&res_hello, "test/hello");
-/*  rest_activate_resource(&res_mirror, "debug/mirror"); */
-/*  rest_activate_resource(&res_chunks, "test/chunks"); */
-/*  rest_activate_resource(&res_separate, "test/separate"); */
-  rest_activate_resource(&res_push, "test/push");
-/*  rest_activate_resource(&res_event, "test/serial"); */
-/*  rest_activate_resource(&res_sub, "test/sub"); */
-/*  rest_activate_resource(&res_b1_sep_b2, "test/b1sepb2"); */
+
 
 
 #if PLATFORM_HAS_LEDS
@@ -324,5 +286,3 @@ PROCESS_THREAD(er_example_server, ev, data)
 
   PROCESS_END();
 }
-
-
